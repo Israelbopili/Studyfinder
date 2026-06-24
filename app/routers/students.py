@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import get_current_user, get_verified_user
-from app.models.student import Student, CourseEnrollment, Course
+from app.models.student import Student, StudentCourse, Course
 from app.schemas.schemas import StudentOut, StudentProfileUpdate, CourseOut, MessageResponse
 
 router = APIRouter(prefix="/students", tags=["Students"])
@@ -34,8 +34,8 @@ async def get_my_courses(
 ):
     result = await db.execute(
         select(Course)
-        .join(CourseEnrollment, CourseEnrollment.course_id == Course.course_id)
-        .where(CourseEnrollment.student_id == current_user.student_id)
+        .join(StudentCourse, StudentCourse.course_id == Course.course_id)
+        .where(StudentCourse.student_id == current_user.student_id)
     )
     return result.scalars().all()
 
@@ -54,15 +54,15 @@ async def enroll_in_course(
 
     # Check not already enrolled
     existing = await db.execute(
-        select(CourseEnrollment).where(
-            CourseEnrollment.student_id == current_user.student_id,
-            CourseEnrollment.course_id == course_id
+        select(StudentCourse).where(
+            StudentCourse.student_id == current_user.student_id,
+            StudentCourse.course_id == course_id
         )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Already enrolled in this course")
 
-    enrollment = CourseEnrollment(
+    enrollment = StudentCourse(
         student_id=current_user.student_id,
         course_id=course_id
     )
@@ -78,9 +78,9 @@ async def unenroll_from_course(
     current_user: Student = Depends(get_verified_user),
 ):
     result = await db.execute(
-        select(CourseEnrollment).where(
-            CourseEnrollment.student_id == current_user.student_id,
-            CourseEnrollment.course_id == course_id
+        select(StudentCourse).where(
+            StudentCourse.student_id == current_user.student_id,
+            StudentCourse.course_id == course_id
         )
     )
     enrollment = result.scalar_one_or_none()

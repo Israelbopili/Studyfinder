@@ -1,12 +1,12 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.security import get_verified_user
-from app.models.student import Student, StudyGroup, GroupMember, CourseEnrollment
+from app.models.student import Student, StudyGroup, GroupMember, StudentCourse
 from app.schemas.schemas import (
     StudyGroupCreate, StudyGroupUpdate, StudyGroupOut,
     StudyGroupDetail, MemberOut, AddMemberRequest,
@@ -71,8 +71,8 @@ async def list_groups(
 ):
     # Get student's enrolled course IDs
     enrolled = await db.execute(
-        select(CourseEnrollment.course_id)
-        .where(CourseEnrollment.student_id == current_user.student_id)
+        select(StudentCourse.course_id)
+        .where(StudentCourse.student_id == current_user.student_id)
     )
     enrolled_course_ids = [r[0] for r in enrolled.all()]
 
@@ -108,7 +108,7 @@ async def list_groups(
     return [build_group_out(g, current_user) for g in groups]
 
 
-@router.post("/", response_model=StudyGroupOut, status_code=201)
+@router.post("/", response_model=StudyGroupOut, status_code=status.HTTP_201_CREATED)
 async def create_group(
     data: StudyGroupCreate,
     db: AsyncSession = Depends(get_db),
@@ -123,7 +123,7 @@ async def create_group(
         max_members=data.max_members,
     )
     db.add(group)
-    await db.flush()  # get group_id before adding member
+    await db.flush()
 
     # Creator becomes admin automatically
     admin_member = GroupMember(
@@ -134,7 +134,7 @@ async def create_group(
     db.add(admin_member)
     await db.flush()
 
-    # Reload with members
+    # Reload group to properly reflect structural associations
     group = await get_group_or_404(group.group_id, db)
     return build_group_out(group, current_user)
 
@@ -147,7 +147,6 @@ async def get_group(
 ):
     group = await get_group_or_404(group_id, db)
 
-    # Private groups: only members can see details
     is_member = any(m.student_id == current_user.student_id for m in group.members)
     if group.privacy_status == "private" and not is_member:
         raise HTTPException(status_code=403, detail="This is a private group")
@@ -268,7 +267,6 @@ async def add_member(
     if member_count(group) >= group.max_members:
         raise HTTPException(status_code=400, detail="Group is full")
 
-    # Check student exists
     result = await db.execute(select(Student).where(Student.student_id == data.student_id))
     student = result.scalar_one_or_none()
     if not student:

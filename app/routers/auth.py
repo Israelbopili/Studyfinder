@@ -43,46 +43,56 @@ async def send_password_reset_email(email: str, first_name: str, token: str):
     print(f"\n[EMAIL] Password reset link for {first_name}: {link}\n")
 
 
-# ── Routes ───────────────────────────────────────────────────────────
+# ── Routes ──────────────────────────────────────────────────────────
 
-@router.post("/register", response_model=MessageResponse, status_code=201)
-async def register(
-    data: StudentRegister,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
-    # Check email not taken
-    existing = await db.execute(select(Student).where(Student.email == data.email))
-    if existing.scalar_one_or_none():
+@router.post("/register", status_code=status.HTTP_201_CREATED, response_model=MessageResponse)
+async def register(data: StudentRegister, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    # Check if user exists
+    result = await db.execute(select(Student).where(Student.email == data.email))
+    if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Check student number not taken
-    existing_num = await db.execute(
-        select(Student).where(Student.student_number == data.student_number)
-    )
-    if existing_num.scalar_one_or_none():
+    result_num = await db.execute(select(Student).where(Student.student_number == data.student_number))
+    if result_num.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Student number already registered")
 
-    verification_token = generate_token()
+    v_token = generate_token()
 
-    student = Student(
+    # Create new Student instance mapping to correct columns
+    new_student = Student(
         first_name=data.first_name,
         last_name=data.last_name,
         email=data.email,
         student_number=data.student_number,
-        hashed_password=hash_password(data.password),
+        password_hash=hash_password(data.password),
         program=data.program,
         year_of_study=data.year_of_study,
-        email_verification_token=verification_token,
+        verification_token=v_token
     )
-    db.add(student)
-    await db.flush()
+
+    db.add(new_student)
+    await db.flush()  
 
     background_tasks.add_task(
-        send_verification_email, data.email, data.first_name, verification_token
+        send_verification_email, new_student.email, new_student.first_name, v_token
     )
 
-    return {"message": "Registration successful. Please check your email to verify your account."}
+    return {"message": "Registration successful! Please check your terminal console for the verification email link token."}
+
+
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(data: EmailVerifyRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Student).where(Student.verification_token == data.token))
+    student = result.scalar_one_or_none()
+
+    if not student:
+        raise HTTPException(status_code=400, detail="Invalid verification token")
+
+    student.email_verified = True
+    student.is_verified = True
+    student.verification_token = None  # Consume the token
+
+    return {"message": "Email verified successfully! You can now log in."}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -90,79 +100,56 @@ async def login(data: StudentLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Student).where(Student.email == data.email))
     student = result.scalar_one_or_none()
 
-    if not student or not verify_password(data.password, student.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not student or not verify_password(data.password, student.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
 
     if not student.is_active:
-        raise HTTPException(status_code=403, detail="Account is deactivated")
+        raise HTTPException(status_code=400, detail="Account disabled")
 
-    if not student.email_verified:
-        raise HTTPException(status_code=403, detail="Please verify your email first")
+    # Generate access & refresh JSON Web Tokens
+    access_token = create_access_token(data={"sub": str(student.student_id)})
+    refresh_token = create_refresh_token(data={"sub": str(student.student_id)})
 
-    # Update last active
-    student.last_active = datetime.now(timezone.utc)
-
-    token_data = {"sub": str(student.student_id)}
     return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer"
     }
 
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(data: RefreshTokenRequest, db: AsyncSession = Depends(get_db)):
     payload = decode_token(data.refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    if payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid token type")
-
-    student_id = payload.get("sub")
-    result = await db.execute(select(Student).where(Student.student_id == student_id))
+    user_id = payload.get("sub")
+    result = await db.execute(select(Student).where(Student.student_id == uuid.UUID(user_id)))
     student = result.scalar_one_or_none()
 
     if not student or not student.is_active:
-        raise HTTPException(status_code=401, detail="Student not found or inactive")
+        raise HTTPException(status_code=401, detail="User not found or suspended")
 
-    token_data = {"sub": str(student.student_id)}
+    new_access = create_access_token(data={"sub": str(student.student_id)})
+    new_refresh = create_refresh_token(data={"sub": str(student.student_id)})
+
     return {
-        "access_token": create_access_token(token_data),
-        "refresh_token": create_refresh_token(token_data),
-        "token_type": "bearer",
+        "access_token": new_access,
+        "refresh_token": new_refresh,
+        "token_type": "bearer"
     }
 
 
-@router.post("/verify-email", response_model=MessageResponse)
-async def verify_email(data: EmailVerifyRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Student).where(Student.email_verification_token == data.token)
-    )
-    student = result.scalar_one_or_none()
-
-    if not student:
-        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
-
-    student.email_verified = True
-    student.is_verified = True
-    student.email_verification_token = None
-
-    return {"message": "Email verified successfully. You can now log in."}
-
-
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(
-    data: PasswordResetRequest,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-):
+async def forgot_password(data: PasswordResetRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Student).where(Student.email == data.email))
     student = result.scalar_one_or_none()
 
     # Always return success to avoid revealing if email exists
     if student:
         token = generate_token()
-        student.password_reset_token = token
-        student.password_reset_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+        student.reset_password_token = token
+        student.reset_password_expires = datetime.now(timezone.utc) + timedelta(hours=24)
         background_tasks.add_task(
             send_password_reset_email, student.email, student.first_name, token
         )
@@ -173,19 +160,19 @@ async def forgot_password(
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(data: PasswordResetConfirm, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Student).where(Student.password_reset_token == data.token)
+        select(Student).where(Student.reset_password_token == data.token)
     )
     student = result.scalar_one_or_none()
 
     if not student:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
 
-    if student.password_reset_expires < datetime.now(timezone.utc):
+    if student.reset_password_expires < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Reset token has expired")
 
-    student.hashed_password = hash_password(data.new_password)
-    student.password_reset_token = None
-    student.password_reset_expires = None
+    student.password_hash = hash_password(data.new_password)
+    student.reset_password_token = None
+    student.reset_password_expires = None
 
     return {"message": "Password reset successful. You can now log in."}
 

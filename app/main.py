@@ -7,8 +7,8 @@ from app.core.database import engine, Base
 
 # Import all models so they register with Base metadata
 from app.models.student import (
-    Student, Course, CourseEnrollment, StudyGroup,
-    GroupMember, Resource, StudySession, ChatMessage, Notification
+    Student, Course, StudentCourse, StudyGroup,
+    GroupMember, Resource, Session, Message, Notification
 )
 
 # Import routers

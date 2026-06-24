@@ -1,8 +1,9 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
 from enum import Enum
+from typing import Optional, Dict, Any
 
 
 # ── Enums ───────────────────────────────────────────────────────────
@@ -147,7 +148,7 @@ class StudyGroupOut(BaseModel):
     group_name: str
     description: Optional[str] = None
     course_id: Optional[UUID] = None
-    creator_id: UUID
+    creator_id: UUID 
     privacy_status: PrivacyStatus
     max_members: int
     member_count: int = 0
@@ -176,11 +177,12 @@ class ResourceOut(BaseModel):
     resource_id: UUID
     title: str
     description: Optional[str] = None
-    file_url: str
+    file_name: str
+    file_path: str
     file_type: Optional[str] = None
     file_size: Optional[int] = None
     group_id: UUID
-    uploader_id: UUID
+    uploaded_by: UUID
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -194,8 +196,8 @@ class StudySessionCreate(BaseModel):
     group_id: UUID
     location: Optional[str] = None
     meeting_link: Optional[str] = None
-    scheduled_at: datetime
-    duration_minutes: int = Field(default=60, ge=15, le=480)
+    start_time: datetime
+    end_time: datetime
 
 
 class StudySessionOut(BaseModel):
@@ -203,12 +205,12 @@ class StudySessionOut(BaseModel):
     title: str
     description: Optional[str] = None
     group_id: UUID
-    creator_id: UUID
+    created_by: UUID
     location: Optional[str] = None
     meeting_link: Optional[str] = None
-    scheduled_at: datetime
-    duration_minutes: int
-    is_cancelled: bool
+    start_time: datetime
+    end_time: datetime
+    status: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -221,7 +223,7 @@ class ChatMessageOut(BaseModel):
     group_id: UUID
     sender_id: UUID
     content: str
-    created_at: datetime
+    sent_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -249,3 +251,17 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     results: list
+class MessageCreate(BaseModel):
+    group_id: UUID
+    content: str
+    meta_data: Optional[Dict[str, Any]] = {"is_pinned": False, "attachment_type": "none"}
+
+class MessageResponse(BaseModel):
+    message_id: UUID
+    group_id: UUID
+    sender_id: UUID
+    content: str
+    meta_data: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

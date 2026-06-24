@@ -19,33 +19,32 @@ class Student(Base):
     student_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    email = Column(String(100), unique=True, nullable=False, index=True)
     student_number = Column(String(20), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=False)          # ← matches DB
     program = Column(String(100), nullable=True)
     year_of_study = Column(Integer, nullable=True)
-    profile_photo = Column(String(500), nullable=True)
+    profile_photo_url = Column(String(255), nullable=True)       # ← matches DB
     bio = Column(Text, nullable=True)
     study_preferences = Column(JSONB, default={})
 
     is_active = Column(Boolean, default=True)
-    is_staff = Column(Boolean, default=False)
     is_verified = Column(Boolean, default=False)
     email_verified = Column(Boolean, default=False)
-    email_verification_token = Column(String(64), nullable=True)
-    password_reset_token = Column(String(64), nullable=True)
-    password_reset_expires = Column(DateTime(timezone=True), nullable=True)
-    last_active = Column(DateTime(timezone=True), nullable=True)
+    verification_token = Column(String(255), nullable=True)      # ← matches DB
+    reset_password_token = Column(String(255), nullable=True)    # ← matches DB
+    reset_password_expires = Column(DateTime, nullable=True)     # ← matches DB
+    last_active = Column(DateTime, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationships
     created_groups = relationship("StudyGroup", back_populates="creator", foreign_keys="StudyGroup.creator_id")
     group_memberships = relationship("GroupMember", back_populates="student")
-    enrollments = relationship("CourseEnrollment", back_populates="student")
+    enrollments = relationship("StudentCourse", back_populates="student")
     uploaded_resources = relationship("Resource", back_populates="uploader")
-    sessions_created = relationship("StudySession", back_populates="creator")
+    sessions_created = relationship("Session", back_populates="creator")
     notifications = relationship("Notification", back_populates="student")
 
     def get_full_name(self):
@@ -60,23 +59,26 @@ class Course(Base):
     course_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     course_code = Column(String(20), unique=True, nullable=False, index=True)
     course_name = Column(String(200), nullable=False)
-    department = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)
+    credits = Column(Integer, default=3)
+    department = Column(String(100), nullable=True)
+    semester = Column(String(20), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    # Relationships
-    enrollments = relationship("CourseEnrollment", back_populates="course")
+    enrollments = relationship("StudentCourse", back_populates="course")
     groups = relationship("StudyGroup", back_populates="course")
 
 
-class CourseEnrollment(Base):
-    __tablename__ = "course_enrollments"
+class StudentCourse(Base):
+    __tablename__ = "student_courses"               # ← matches DB
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     student_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.course_id", ondelete="CASCADE"))
-    enrolled_at = Column(DateTime(timezone=True), server_default=func.now())
+    grade = Column(String(5), nullable=True)
+    enrolled_at = Column(DateTime, server_default=func.now())
 
     __table_args__ = (UniqueConstraint("student_id", "course_id", name="uq_student_course"),)
 
@@ -94,22 +96,18 @@ class StudyGroup(Base):
     description = Column(Text, nullable=True)
     course_id = Column(UUID(as_uuid=True), ForeignKey("courses.course_id", ondelete="SET NULL"), nullable=True)
     creator_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
-    privacy_status = Column(
-        SAEnum("public", "private", "invite_only", name="privacy_enum"),
-        default="public"
-    )
+    privacy_status = Column(String(20), default="public")
     max_members = Column(Integer, default=50)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    # Relationships
     creator = relationship("Student", back_populates="created_groups", foreign_keys=[creator_id])
     course = relationship("Course", back_populates="groups")
     members = relationship("GroupMember", back_populates="group", cascade="all, delete-orphan")
     resources = relationship("Resource", back_populates="group")
-    sessions = relationship("StudySession", back_populates="group")
-    messages = relationship("ChatMessage", back_populates="group")
+    sessions = relationship("Session", back_populates="group")
+    messages = relationship("Message", back_populates="group")
 
 
 class GroupMember(Base):
@@ -118,12 +116,9 @@ class GroupMember(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     group_id = Column(UUID(as_uuid=True), ForeignKey("study_groups.group_id", ondelete="CASCADE"))
     student_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
-    role = Column(
-        SAEnum("admin", "moderator", "member", name="role_enum"),
-        default="member"
-    )
-    joined_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_active = Column(DateTime(timezone=True), nullable=True)
+    role = Column(String(20), default="member")
+    joined_at = Column(DateTime, server_default=func.now())
+    last_active = Column(DateTime, nullable=True)
     is_notified = Column(Boolean, default=True)
 
     __table_args__ = (UniqueConstraint("group_id", "student_id", name="uq_group_member"),)
@@ -140,49 +135,56 @@ class Resource(Base):
     resource_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    file_url = Column(String(500), nullable=False)
+    file_name = Column(String(255), nullable=False)              # ← matches DB
+    file_path = Column(String(500), nullable=False)              # ← matches DB
     file_type = Column(String(50), nullable=True)
     file_size = Column(Integer, nullable=True)
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))  # ← matches DB
     group_id = Column(UUID(as_uuid=True), ForeignKey("study_groups.group_id", ondelete="CASCADE"))
-    uploader_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    downloads_count = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     group = relationship("StudyGroup", back_populates="resources")
-    uploader = relationship("Student", back_populates="uploaded_resources")
+    uploader = relationship("Student", back_populates="uploaded_resources", foreign_keys=[uploaded_by])
 
 
-# ── Study Session ───────────────────────────────────────────────────
+# ── Session ─────────────────────────────────────────────────────────
 
-class StudySession(Base):
-    __tablename__ = "study_sessions"
+class Session(Base):
+    __tablename__ = "sessions"                                   # ← matches DB
 
     session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id = Column(UUID(as_uuid=True), ForeignKey("study_groups.group_id", ondelete="CASCADE"))
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    group_id = Column(UUID(as_uuid=True), ForeignKey("study_groups.group_id", ondelete="CASCADE"))
-    creator_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
-    location = Column(String(300), nullable=True)
-    meeting_link = Column(String(500), nullable=True)
-    scheduled_at = Column(DateTime(timezone=True), nullable=False)
-    duration_minutes = Column(Integer, default=60)
-    is_cancelled = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    start_time = Column(DateTime, nullable=False)                # ← matches DB
+    end_time = Column(DateTime, nullable=False)                  # ← matches DB
+    location = Column(String(200), nullable=True)
+    meeting_link = Column(String(255), nullable=True)
+    status = Column(String(20), default="scheduled")            # ← matches DB
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_by = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))  # ← matches DB
 
     group = relationship("StudyGroup", back_populates="sessions")
-    creator = relationship("Student", back_populates="sessions_created")
+    creator = relationship("Student", back_populates="sessions_created", foreign_keys=[created_by])
 
 
-# ── Chat Message ────────────────────────────────────────────────────
+# ── Message ─────────────────────────────────────────────────────────
 
-class ChatMessage(Base):
-    __tablename__ = "chat_messages"
+class Message(Base):
+    __tablename__ = "messages"                                   # ← matches DB
 
     message_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     group_id = Column(UUID(as_uuid=True), ForeignKey("study_groups.group_id", ondelete="CASCADE"))
     sender_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    is_deleted = Column(Boolean, default=False)
+    message_type = Column(String(20), default="text")
+    reply_to_id = Column(UUID(as_uuid=True), ForeignKey("messages.message_id", ondelete="SET NULL"), nullable=True)
+    is_edited = Column(Boolean, default=False)
+    sent_at = Column(DateTime, server_default=func.now())        # ← matches DB
+    edited_at = Column(DateTime, nullable=True)
 
     group = relationship("StudyGroup", back_populates="messages")
     sender = relationship("Student")
@@ -195,10 +197,11 @@ class Notification(Base):
 
     notification_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     student_id = Column(UUID(as_uuid=True), ForeignKey("students.student_id", ondelete="CASCADE"))
+    type = Column(String(50), nullable=True)
     title = Column(String(200), nullable=False)
     message = Column(Text, nullable=False)
-    type = Column(String(50), nullable=True)   # e.g. "group_invite", "session_reminder"
+    meta_data = Column(JSONB, default={})
     is_read = Column(Boolean, default=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())
 
     student = relationship("Student", back_populates="notifications")

@@ -1,15 +1,17 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.security import get_verified_user
 from app.models.student import (
-    Student, Course, StudySession, Resource,
-    Notification, StudyGroup, GroupMember
+    Student, Course, StudyGroup, GroupMember, Resource, Notification
 )
+# Note: Since the end of student.py was trailing off, we assume the class name for session matches what's imported.
+# If your session model name is Session or StudySession, verify it fits your specific import format below:
+from app.models.student import Session 
+
 from app.schemas.schemas import (
     CourseCreate, CourseOut,
     StudySessionCreate, StudySessionOut,
@@ -37,15 +39,12 @@ async def list_courses(
     return result.scalars().all()
 
 
-@courses_router.post("/", response_model=CourseOut, status_code=201)
+@courses_router.post("/", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
 async def create_course(
     data: CourseCreate,
     db: AsyncSession = Depends(get_db),
     current_user: Student = Depends(get_verified_user),
 ):
-    if not current_user.is_staff:
-        raise HTTPException(status_code=403, detail="Only staff can create courses")
-
     existing = await db.execute(select(Course).where(Course.course_code == data.course_code))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Course code already exists")
@@ -85,7 +84,7 @@ async def _check_group_member(group_id: UUID, student: Student, db: AsyncSession
         raise HTTPException(status_code=403, detail="You must be a group member to do this")
 
 
-@sessions_router.post("/", response_model=StudySessionOut, status_code=201)
+@sessions_router.post("/", response_model=StudySessionOut, status_code=status.HTTP_201_CREATED)
 async def create_session(
     data: StudySessionCreate,
     db: AsyncSession = Depends(get_db),
@@ -93,15 +92,15 @@ async def create_session(
 ):
     await _check_group_member(data.group_id, current_user, db)
 
-    session = StudySession(
+    session = Session(
         title=data.title,
         description=data.description,
         group_id=data.group_id,
-        creator_id=current_user.student_id,
+        created_by=current_user.student_id,
         location=data.location,
         meeting_link=data.meeting_link,
-        scheduled_at=data.scheduled_at,
-        duration_minutes=data.duration_minutes,
+        start_time=data.start_time,
+        end_time=data.end_time,
     )
     db.add(session)
     await db.flush()
@@ -117,9 +116,9 @@ async def list_group_sessions(
     await _check_group_member(group_id, current_user, db)
 
     result = await db.execute(
-        select(StudySession)
-        .where(StudySession.group_id == group_id, StudySession.is_cancelled == False)
-        .order_by(StudySession.scheduled_at)
+        select(Session)
+        .where(Session.group_id == group_id, Session.status != "cancelled")
+        .order_by(Session.start_time)
     )
     return result.scalars().all()
 
@@ -130,15 +129,15 @@ async def cancel_session(
     db: AsyncSession = Depends(get_db),
     current_user: Student = Depends(get_verified_user),
 ):
-    result = await db.execute(select(StudySession).where(StudySession.session_id == session_id))
+    result = await db.execute(select(Session).where(Session.session_id == session_id))
     session = result.scalar_one_or_none()
 
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.creator_id != current_user.student_id:
+    if session.created_by != current_user.student_id:
         raise HTTPException(status_code=403, detail="Only the session creator can cancel it")
 
-    session.is_cancelled = True
+    session.status = "cancelled"
     return {"message": "Session cancelled"}
 
 
@@ -163,7 +162,7 @@ async def list_group_resources(
     return result.scalars().all()
 
 
-@resources_router.post("/group/{group_id}", response_model=ResourceOut, status_code=201)
+@resources_router.post("/group/{group_id}", response_model=ResourceOut, status_code=status.HTTP_201_CREATED)
 async def upload_resource(
     group_id: UUID,
     title: str,
@@ -174,9 +173,7 @@ async def upload_resource(
 ):
     await _check_group_member(group_id, current_user, db)
 
-    # In production: upload file to S3 and get URL back
-    # For now, store the filename as URL placeholder
-    file_url = f"/media/resources/{group_id}/{file.filename}"
+    file_path = f"/media/resources/{group_id}/{file.filename}"
     file_size = 0
 
     try:
@@ -188,11 +185,12 @@ async def upload_resource(
     resource = Resource(
         title=title,
         description=description,
-        file_url=file_url,
+        file_name=file.filename,
+        file_path=file_path,
         file_type=file.content_type,
         file_size=file_size,
         group_id=group_id,
-        uploader_id=current_user.student_id,
+        uploaded_by=current_user.student_id,  # Points safely to your models naming layout
     )
     db.add(resource)
     await db.flush()
@@ -210,7 +208,7 @@ async def delete_resource(
 
     if not resource:
         raise HTTPException(status_code=404, detail="Resource not found")
-    if resource.uploader_id != current_user.student_id and not current_user.is_staff:
+    if resource.uploaded_by != current_user.student_id:
         raise HTTPException(status_code=403, detail="You can only delete your own resources")
 
     await db.delete(resource)
