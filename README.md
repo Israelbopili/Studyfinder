@@ -158,14 +158,5 @@ SCREENSHOTS OF WORKING END-POINTS BELOW
 pip install pytest pytest-asyncio httpx aiosqlite
 pytest tests/ -v
 ```
+If you have any questions please dont feel free to ask
 
----
-
-## Deliverables Timeline
-
-| Week | Tasks |
-|------|-------|
-| 1–2 | ✅ Project setup, auth (register/login/logout), JWT, email verify, profile API |
-| 3–4 | ✅ Courses API, enrollment, password reset, user CRUD |
-| 5–6 | ✅ Groups API, resources, sessions, dashboard endpoint |
-| 7–8 | ✅ WebSocket chat, notifications, smart matching, tests |
