@@ -1,0 +1,9 @@
+from .auth import router as auth_router
+from .students import router as students_router
+from .groups import router as groups_router
+from .courses import router as courses_router
+from .sessions import router as sessions_router
+from .resources import router as resources_router
+from .notifications import router as notifications_router
+from .matching import router as matching_router
+from .chat import router as chat_router
