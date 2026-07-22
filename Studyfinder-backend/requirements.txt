@@ -1,44 +1,44 @@
 # Core
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-python-decouple==3.8
-python-multipart==0.0.9
+fastapi
+uvicorn[standard]
+python-decouple
+python-multipart
 
 # Database
-sqlalchemy==2.0.30
-asyncpg==0.29.0
-alembic==1.13.1
-psycopg2-binary==2.9.9
+sqlalchemy
+asyncpg
+alembic
+psycopg2-binary
 
 # Authentication & Security
-python-jose[cryptography]==3.3.0
-passlib==1.7.4
-bcrypt==4.0.1
+python-jose[cryptography]
+passlib
+bcrypt
 
 # Validation
-pydantic==2.7.1
-pydantic[email]==2.7.1
-email-validator==2.1.1
+pydantic
+pydantic[email]
+email-validator
 
 # File Handling
-aiofiles==23.2.1
-boto3==1.34.0
+aiofiles
+boto3
 
 # Email
-fastapi-mail==1.4.1
+fastapi-mail
 
 # WebSocket / Async
-websockets==12.0
-redis==5.0.4
-celery==5.3.6
+websockets
+redis
+celery
 
 # Testing
-pytest==8.2.0
-pytest-asyncio==0.23.6
-httpx==0.27.0
-factory-boy==3.3.0
-faker==25.0.0
+pytest
+pytest-asyncio
+httpx
+factory-boy
+faker
 
 # Utilities
-python-slugify==8.0.4
+python-slugify
 Pillow==12.3.0
